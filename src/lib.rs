@@ -52,12 +52,24 @@ impl From<byteorder::Error> for Error {
     }
 }
 
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(_: std::string::FromUtf8Error) -> Error {
+        Error::InvalidData
+    }
+}
+
 /// Result shorthand using our Error enum.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Four-byte 'character code' describing the type of a piece of data.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct FourCC([u8; 4]);
+
+impl FourCC {
+    fn as_bytes(&self) -> &[u8; 4] {
+        &self.0
+    }
+}
 
 impl fmt::Debug for FourCC {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -203,13 +215,26 @@ enum SampleEntry {
     Unknown,
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone)]
+enum AudioCodecSpecific {
+    ES_Descriptor(Vec<u8>),
+    OpusSpecificBox(OpusSpecificBox),
+}
+
 #[derive(Debug, Clone)]
 struct AudioSampleEntry {
     data_reference_index: u16,
     channelcount: u16,
     samplesize: u16,
     samplerate: u32,
-    esds: ES_Descriptor,
+    codec_specific: AudioCodecSpecific,
+}
+
+#[derive(Debug, Clone)]
+enum VideoCodecSpecific {
+    AVCConfig(Vec<u8>),
+    VPxConfig(VPxConfigBox),
 }
 
 #[derive(Debug, Clone)]
@@ -217,18 +242,39 @@ struct VideoSampleEntry {
     data_reference_index: u16,
     width: u16,
     height: u16,
-    avcc: AVCDecoderConfigurationRecord,
+    codec_specific: VideoCodecSpecific,
+}
+
+/// Represent a Video Partition Codec Configuration 'vpcC' box (aka vp9).
+#[derive(Debug, Clone)]
+struct VPxConfigBox {
+    profile: u8,
+    level: u8,
+    bit_depth: u8,
+    color_space: u8, // Really an enum
+    chroma_subsampling: u8,
+    transfer_function: u8,
+    video_full_range: bool,
+    codec_init: Vec<u8>, // Empty for vp8/vp9.
 }
 
 #[derive(Debug, Clone)]
-struct AVCDecoderConfigurationRecord {
-    data: Vec<u8>,
+struct ChannelMappingTable {
+    stream_count: u8,
+    coupled_count: u8,
+    channel_mapping: Vec<u8>,
 }
 
-#[allow(non_camel_case_types)]
+/// Represent an OpusSpecificBox 'dOps'
 #[derive(Debug, Clone)]
-struct ES_Descriptor {
-    data: Vec<u8>,
+struct OpusSpecificBox {
+    version: u8,
+    output_channel_count: u8,
+    pre_skip: u16,
+    input_sample_rate: u32,
+    output_gain: i16,
+    channel_mapping_family: u8,
+    channel_mapping_table: Option<ChannelMappingTable>,
 }
 
 /// Internal data structures.
@@ -242,7 +288,7 @@ pub struct MediaContext {
 }
 
 impl MediaContext {
-    pub fn new() -> MediaContext {
+    pub fn new() -> Self {
         MediaContext {
             timescale: None,
             tracks: Vec::new(),
@@ -256,9 +302,9 @@ impl MediaContext {
 }
 
 macro_rules! log {
-    ( $ctx:expr, $( $args:expr),* ) => {
+    ( $ctx:expr, $( $args:tt )* ) => {
         if $ctx.trace {
-            println!( $( $args, )* );
+            println!( $( $args )* );
         }
     }
 }
@@ -298,10 +344,11 @@ struct Track {
     mime_type: String,
     data: Option<SampleEntry>,
     tkhd: Option<TrackHeaderBox>, // TODO(kinetik): find a nicer way to export this.
+    trace: bool,
 }
 
 impl Track {
-    fn new(id: usize) -> Track {
+    fn new(id: usize) -> Self {
         Track {
             id: id,
             track_type: TrackType::Unknown,
@@ -313,6 +360,7 @@ impl Track {
             mime_type: String::new(),
             data: None,
             tkhd: None,
+            trace: false,
         }
     }
 }
@@ -378,17 +426,26 @@ fn limit<'a, T: BufRead>(f: &'a mut T, h: &BoxHeader) -> Take<&'a mut T> {
     f.take(h.size - h.offset)
 }
 
-fn driver<F, T: BufRead>(f: &mut T, context: &mut MediaContext, mut action: F) -> Result<()>
-    where F: FnMut(&mut MediaContext, BoxHeader, &mut Take<&mut T>) -> Result<()>
+/// Helper to recursively parse a the contents of a box.
+/// Reads a box header from the source given in the first argument
+/// and then calls the passed closure to dispatch further based
+/// on that header.
+fn driver<F, T>(f: &mut T, context: &mut MediaContext, mut action: F) -> Result<()>
+    where F: FnMut(&mut Take<&mut T>, BoxHeader, &mut MediaContext) -> Result<()>,
+          T: BufRead,
 {
     loop {
         let r = read_box_header(f).and_then(|h| {
             let mut content = limit(f, &h);
-            let r = action(context, h, &mut content);
+            let r = action(&mut content, h, context);
             if r.is_ok() {
-                // TODO(kinetik): can check this for "non-fatal" errors (e.g. EOF) too.
-                log!(context, "{} content bytes left", content.limit());
-                assert!(content.limit() == 0);
+                if content.limit() > 0 {
+                    // It's possible that this is a parser bug rather than a
+                    // bad file (e.g. if we forgot to read the entire box
+                    // contents).
+                    log!(context, "bad parser state: {} content bytes left", content.limit());
+                    return Err(Error::InvalidData);
+                }
                 log!(context, "read_box context: {:?}", context);
             }
             r
@@ -431,8 +488,8 @@ fn driver<F, T: BufRead>(f: &mut T, context: &mut MediaContext, mut action: F) -
 /// Metadata is accumulated in the passed-through MediaContext struct,
 /// which can be examined later.
 pub fn read_mp4<T: BufRead>(f: &mut T, context: &mut MediaContext) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"ftyp" => {
                 let ftyp = try!(read_ftyp(&mut content, &h));
                 log!(context, "{:?}", ftyp);
@@ -457,8 +514,8 @@ fn parse_mvhd<T: BufRead>(f: &mut T, h: &BoxHeader) -> Result<(MovieHeaderBox, O
 }
 
 fn read_moov<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"mvhd" => {
                 let (mvhd, timescale) = try!(parse_mvhd(content, &h));
                 context.timescale = timescale;
@@ -466,6 +523,7 @@ fn read_moov<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext) -
             }
             b"trak" => {
                 let mut track = Track::new(context.tracks.len());
+                track.trace = context.trace;
                 try!(read_trak(&mut content, &h, context, &mut track));
                 context.tracks.push(track);
             }
@@ -480,8 +538,8 @@ fn read_moov<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext) -
 }
 
 fn read_trak<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, track: &mut Track) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"tkhd" => {
                 let tkhd = try!(read_tkhd(&mut content, &h));
                 track.track_id = Some(tkhd.track_id);
@@ -501,8 +559,8 @@ fn read_trak<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, t
 }
 
 fn read_edts<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, track: &mut Track) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"elst" => {
                 let elst = try!(read_elst(&mut content, &h));
                 let mut empty_duration = 0;
@@ -546,8 +604,8 @@ fn parse_mdhd<T: BufRead>(f: &mut T, h: &BoxHeader, track: &mut Track) -> Result
 }
 
 fn read_mdia<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, track: &mut Track) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"mdhd" => {
                 let (mdhd, duration, timescale) = try!(parse_mdhd(content, &h, track));
                 track.duration = duration;
@@ -575,8 +633,8 @@ fn read_mdia<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, t
 }
 
 fn read_minf<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, track: &mut Track) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"stbl" => try!(read_stbl(&mut content, &h, context, track)),
             _ => {
                 // Skip the contents of unknown chunks.
@@ -589,8 +647,8 @@ fn read_minf<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, t
 }
 
 fn read_stbl<T: BufRead>(f: &mut T, _: &BoxHeader, context: &mut MediaContext, track: &mut Track) -> Result<()> {
-    driver(f, context, |context, h, mut content| {
-        match &h.name.0 {
+    driver(f, context, |mut content, h, context| {
+        match h.name.as_bytes() {
             b"stsd" => {
                 let stsd = try!(read_stsd(&mut content, &h, track));
                 log!(context, "  {:?}", stsd);
@@ -905,6 +963,79 @@ fn read_stts<T: ReadBytesExt>(src: &mut T, head: &BoxHeader) -> Result<TimeToSam
     })
 }
 
+/// Parse a VPx Config Box.
+fn read_vpcc<T: ReadBytesExt>(src: &mut T) -> Result<VPxConfigBox> {
+    let (version, _) = try!(read_fullbox_extra(src));
+    if version != 0 {
+        return Err(Error::Unsupported);
+    }
+
+    let profile = try!(src.read_u8());
+    let level = try!(src.read_u8());
+    let (bit_depth, color_space) = {
+        let byte = try!(src.read_u8());
+        ((byte >> 4) & 0x0f, byte & 0x0f)
+    };
+    let (chroma_subsampling, transfer_function, video_full_range) = {
+        let byte = try!(src.read_u8());
+        ((byte >> 4) & 0x0f, (byte >> 1) & 0x07, (byte & 1) == 1)
+    };
+
+    let codec_init_size = try!(be_u16(src));
+    let codec_init = try!(read_buf(src, codec_init_size as usize));
+
+    // TODO(rillian): validate field value ranges.
+    Ok(VPxConfigBox {
+        profile: profile,
+        level: level,
+        bit_depth: bit_depth,
+        color_space: color_space,
+        chroma_subsampling: chroma_subsampling,
+        transfer_function: transfer_function,
+        video_full_range: video_full_range,
+        codec_init: codec_init,
+    })
+}
+
+/// Parse OpusSpecificBox.
+fn read_dops<T: ReadBytesExt>(src: &mut T) -> Result<OpusSpecificBox> {
+    let version = try!(src.read_u8());
+    if version != 0 {
+        return Err(Error::Unsupported);
+    }
+
+    let output_channel_count = try!(src.read_u8());
+    let pre_skip = try!(be_u16(src));
+    let input_sample_rate = try!(be_u32(src));
+    let output_gain = try!(be_i16(src));
+    let channel_mapping_family = try!(src.read_u8());
+
+    let channel_mapping_table = if channel_mapping_family == 0 {
+        None
+    } else {
+        let stream_count = try!(src.read_u8());
+        let coupled_count = try!(src.read_u8());
+        let channel_mapping = try!(read_buf(src, output_channel_count as usize));
+
+        Some(ChannelMappingTable {
+            stream_count: stream_count,
+            coupled_count: coupled_count,
+            channel_mapping: channel_mapping,
+        })
+    };
+
+    // TODO(kinetik): validate field value ranges.
+    Ok(OpusSpecificBox {
+        version: version,
+        output_channel_count: output_channel_count,
+        pre_skip: pre_skip,
+        input_sample_rate: input_sample_rate,
+        output_gain: output_gain,
+        channel_mapping_family: channel_mapping_family,
+        channel_mapping_table: channel_mapping_table,
+    })
+}
+
 /// Parse a hdlr box.
 fn read_hdlr<T: ReadBytesExt + BufRead>(src: &mut T, head: &BoxHeader) -> Result<HandlerBox> {
     let (_, _) = try!(read_fullbox_extra(src));
@@ -917,9 +1048,14 @@ fn read_hdlr<T: ReadBytesExt + BufRead>(src: &mut T, head: &BoxHeader) -> Result
     // Skip uninteresting fields.
     try!(skip(src, 12));
 
-    // TODO(kinetik): Find a copy of ISO/IEC 14496-1 to work out how strings are encoded.
-    // As a hack, just consume the rest of the box.
-    try!(skip_remaining_box_content(src, head));
+    // XXX(kinetik): need to verify if this zero-length string handling
+    // applies to all "null-terminated" strings (in which case
+    // read_null_terminated_string should handle this check) or this is
+    // specific to the hdlr box.
+    let bytes_left = head.size - head.offset - 24;
+    if bytes_left > 0 {
+        let _name = try!(read_null_terminated_string(src));
+    }
 
     Ok(HandlerBox {
         header: *head,
@@ -930,10 +1066,13 @@ fn read_hdlr<T: ReadBytesExt + BufRead>(src: &mut T, head: &BoxHeader) -> Result
 /// Parse an video description inside an stsd box.
 fn read_video_desc<T: ReadBytesExt + BufRead>(src: &mut T, head: &BoxHeader, track: &mut Track) -> Result<SampleEntry> {
     let h = try!(read_box_header(src));
-    // TODO(kinetik): encv here also?
-    if &h.name.0 != b"avc1" && &h.name.0 != b"avc3" {
-        return Err(Error::Unsupported);
-    }
+    track.mime_type = match h.name.as_bytes() {
+        b"avc1" | b"avc3" => String::from("video/avc"),
+        b"vp08" => String::from("video/vp8"),
+        b"vp09" => String::from("video/vp9"),
+        // TODO(kinetik): encv here also.
+        _ => return Err(Error::Unsupported),
+    };
 
     // Skip uninteresting fields.
     try!(skip(src, 6));
@@ -947,27 +1086,35 @@ fn read_video_desc<T: ReadBytesExt + BufRead>(src: &mut T, head: &BoxHeader, tra
     let height = try!(be_u16(src));
 
     // Skip uninteresting fields.
-    try!(skip(src, 50));
+    try!(skip(src, 14));
 
-    // TODO(kinetik): Parse avcC atom?  For now we just stash the data.
+    let _compressorname = try!(read_fixed_length_pascal_string(src, 32));
+
+    // Skip uninteresting fields.
+    try!(skip(src, 4));
+
     let h = try!(read_box_header(src));
-    if &h.name.0 != b"avcC" {
-        return Err(Error::InvalidData);
-    }
-    let mut data: Vec<u8> = vec![0; (h.size - h.offset) as usize];
-    let r = try!(src.read(&mut data));
-    assert!(r == data.len());
-    let avcc = AVCDecoderConfigurationRecord { data: data };
+    let codec_specific = match h.name.as_bytes() {
+        b"avcC" => {
+            // TODO(kinetik): Parse avcC atom?  For now we just stash the data.
+            let avcc = try!(read_buf(src, (h.size - h.offset) as usize));
+            VideoCodecSpecific::AVCConfig(avcc)
+        }
+        b"vpcC" => {
+            let vpcc = try!(read_vpcc(src));
+            VideoCodecSpecific::VPxConfig(vpcc)
+        }
+        _ => return Err(Error::Unsupported),
+    };
 
+    // Skip clap/pasp/etc. for now.
     try!(skip_remaining_box_content(src, head));
-
-    track.mime_type = String::from("video/avc");
 
     Ok(SampleEntry::Video(VideoSampleEntry {
         data_reference_index: data_reference_index,
         width: width,
         height: height,
-        avcc: avcc,
+        codec_specific: codec_specific,
     }))
 }
 
@@ -975,8 +1122,10 @@ fn read_video_desc<T: ReadBytesExt + BufRead>(src: &mut T, head: &BoxHeader, tra
 fn read_audio_desc<T: ReadBytesExt + BufRead>(src: &mut T, _: &BoxHeader, track: &mut Track) -> Result<SampleEntry> {
     let h = try!(read_box_header(src));
     // TODO(kinetik): enca here also?
-    if &h.name.0 != b"mp4a" {
-        return Err(Error::Unsupported);
+    match h.name.as_bytes() {
+        b"mp4a" => (),
+        b"Opus" => (),
+        _ => return Err(Error::Unsupported),
     }
 
     // Skip uninteresting fields.
@@ -995,26 +1144,33 @@ fn read_audio_desc<T: ReadBytesExt + BufRead>(src: &mut T, _: &BoxHeader, track:
 
     let samplerate = try!(be_u32(src));
 
-    // TODO(kinetik): Parse esds atom?  For now we just stash the data.
     let h = try!(read_box_header(src));
-    if &h.name.0 != b"esds" {
-        return Err(Error::InvalidData);
-    }
-    let (_, _) = try!(read_fullbox_extra(src));
-    let mut data: Vec<u8> = vec![0; (h.size - h.offset - 4) as usize];
-    let r = try!(src.read(&mut data));
-    assert!(r == data.len());
-    let esds = ES_Descriptor { data: data };
+    let codec_specific = match h.name.as_bytes() {
+        b"esds" => {
+            let (_, _) = try!(read_fullbox_extra(src));
+            let esds = try!(read_buf(src, (h.size - h.offset - 4) as usize));
 
-    // TODO(kinetik): stagefright inspects ESDS to detect MP3 (audio/mpeg).
-    track.mime_type = String::from("audio/mp4a-latm");
+            // TODO(kinetik): stagefright inspects ESDS to detect MP3 (audio/mpeg).
+            track.mime_type = String::from("audio/mp4a-latm");
 
+            // TODO(kinetik): Parse esds atom?  For now we just stash the data.
+            AudioCodecSpecific::ES_Descriptor(esds)
+        }
+        b"dOps" => {
+            let dops = try!(read_dops(src));
+            // TODO(kinetik): stagefright doesn't have a MIME mapping for this, revisit.
+            track.mime_type = String::from("audio/opus");
+
+            AudioCodecSpecific::OpusSpecificBox(dops)
+        }
+        _ => return Err(Error::Unsupported),
+    };
     Ok(SampleEntry::Audio(AudioSampleEntry {
         data_reference_index: data_reference_index,
         channelcount: channelcount,
         samplesize: samplesize,
         samplerate: samplerate,
-        esds: esds,
+        codec_specific: codec_specific,
     }))
 }
 
@@ -1060,6 +1216,43 @@ fn skip<T: BufRead>(src: &mut T, bytes: usize) -> Result<usize> {
     }
     assert!(bytes_to_skip == 0);
     Ok(bytes)
+}
+
+/// Read size bytes into a Vector or return error.
+fn read_buf<T: ReadBytesExt>(src: &mut T, size: usize) -> Result<Vec<u8>> {
+    let mut buf = vec![0; size];
+    let r = try!(src.read(&mut buf));
+    if r != size {
+        return Err(Error::InvalidData);
+    }
+    Ok(buf)
+}
+
+// TODO(kinetik): Find a copy of ISO/IEC 14496-1 to confirm various string encodings.
+fn read_null_terminated_string<T: ReadBytesExt>(src: &mut T) -> Result<String> {
+    let mut buf = Vec::new();
+    loop {
+        let c = try!(src.read_u8());
+        if c == 0 {
+            break;
+        }
+        buf.push(c);
+    }
+    Ok(try!(String::from_utf8(buf)))
+}
+
+fn read_pascal_string<T: ReadBytesExt>(src: &mut T) -> Result<String> {
+    let len = try!(src.read_u8());
+    let buf = try!(read_buf(src, len as usize));
+    Ok(try!(String::from_utf8(buf)))
+}
+
+// Weird string encoding with a length prefix and a fixed sized buffer which
+// contains padding if the string doesn't fill the buffer.
+fn read_fixed_length_pascal_string<T: BufRead>(src: &mut T, size: usize) -> Result<String> {
+    let s = try!(read_pascal_string(src));
+    try!(skip(src, size - 1 - s.len()));
+    Ok(s)
 }
 
 fn media_time_to_ms(time: MediaScaledTime, scale: MediaTimeScale) -> u64 {
