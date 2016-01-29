@@ -2,4 +2,6 @@ language: rust
 rust:
   - stable
   - nightly
-compiler: gcc
+before_install:
+  - g++ --version
+  - uname -a
