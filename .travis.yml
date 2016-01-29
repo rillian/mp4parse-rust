@@ -2,6 +2,12 @@ language: rust
 rust:
   - stable
   - nightly
+addons:
+  apt:
+    packages:
+      - g++-4.7
 before_install:
   - g++ --version
   - uname -a
+  - cat /etc/issue
+  - cat /etc/apt/sources.list
