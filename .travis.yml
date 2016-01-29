@@ -2,12 +2,13 @@ language: rust
 rust:
   - stable
   - nightly
-install:
-  - export CXX="g++-4.8" CC="gcc-4.8"
-  - $CXX --version
+
+# Install a modern C++ compiler so we can test capi linkage.
 addons:
   apt:
     sources:
       - ubuntu-toolchain-r-test
     packages:
       - g++-4.8
+env:
+  - CXX="g++-4.8" CC="gcc-4.8"
