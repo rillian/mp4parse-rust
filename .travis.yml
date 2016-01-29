@@ -4,10 +4,14 @@ rust:
   - nightly
 addons:
   apt:
+    sources:
+      - ubuntu-toolchain-r-test
     packages:
-      - g++-4.7
+      - g++-4.8
 before_install:
   - g++ --version
   - uname -a
   - cat /etc/issue
   - cat /etc/apt/sources.list
+install:
+  - if [ "$CXX" = "g++" ]; then export CXX="g++-4.8" CC="gcc-4.8"; fi
