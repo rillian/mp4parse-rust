@@ -221,7 +221,7 @@ pub unsafe extern fn mp4parse_read(parser: *mut mp4parse_parser) -> mp4parse_err
         Err(Error::Unsupported(_)) => MP4PARSE_ERROR_UNSUPPORTED,
         Err(Error::AssertCaught) => MP4PARSE_ERROR_ASSERT,
         Err(Error::Io(UnexpectedEOF)) => MP4PARSE_ERROR_EOF,
-        Err(Error::Io(e)) => MP4PARSE_ERROR_IO,
+        Err(Error::Io(_)) => MP4PARSE_ERROR_IO,
     }
 }
 
