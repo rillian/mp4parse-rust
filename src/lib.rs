@@ -10,7 +10,7 @@ extern crate afl;
 
 extern crate byteorder;
 use byteorder::ReadBytesExt;
-use std::io::{Read, Take};
+use std::io::{Read, Take, ErrorKind};
 use std::cmp;
 
 // Expose C api wrapper.
@@ -56,8 +56,6 @@ pub enum Error {
     InvalidData(&'static str),
     /// Parse error caused by limited parser support rather than invalid data.
     Unsupported(&'static str),
-    /// Reflect `byteorder::Error::UnexpectedEOF` for short data.
-    UnexpectedEOF,
     /// Caught panic! or assert! meaning the parser couldn't recover.
     AssertCaught,
     /// Propagate underlying errors from `std::io`.
@@ -69,15 +67,6 @@ pub enum Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Error {
         Error::Io(err)
-    }
-}
-
-impl From<byteorder::Error> for Error {
-    fn from(err: byteorder::Error) -> Error {
-        match err {
-            byteorder::Error::UnexpectedEOF => Error::UnexpectedEOF,
-            byteorder::Error::Io(e) => Error::Io(e),
-        }
     }
 }
 
@@ -369,7 +358,7 @@ impl<'a, T: Read> BoxIter<'a, T> {
                 head: h,
                 content: self.src.take(h.size - h.offset),
             })),
-            Err(Error::UnexpectedEOF) => Ok(None),
+            Err(Error::Io(UnexpectedEOF)) => Ok(None),
             Err(e) => Err(e),
         }
     }
@@ -1257,16 +1246,31 @@ fn read_stsd<T: Read>(src: &mut BMFFBox<T>, track: &mut Track) -> Result<SampleD
     })
 }
 
+/// Convert old-style Ok(0) EOF to an Err.
+///
+/// Rust 1.6 introduced ErrorKind::UnexpectedEof, but Read::read
+/// implementations can still return Ok(0) for this.
+///
+/// This returns an io::Result so it can be used in expressions
+/// where a read() result would occur.
+fn eof_if_zero(v: usize) -> std::io::Result<usize> {
+    // TODO(rillian) use a T: Zero trait when it's stable.
+    match v {
+        0 => Err(std::io::Error::new(ErrorKind::UnexpectedEof,
+                                     "zero-length read result")),
+        v => Ok(v),
+    }
+}
+
 /// Skip a number of bytes that we don't care to parse.
 fn skip<T: Read>(src: &mut T, mut bytes: usize) -> Result<()> {
     const BUF_SIZE: usize = 64 * 1024;
     let mut buf = vec![0; BUF_SIZE];
     while bytes > 0 {
         let buf_size = cmp::min(bytes, BUF_SIZE);
-        let len = try!(src.take(buf_size as u64).read(&mut buf));
-        if len == 0 {
-            return Err(Error::UnexpectedEOF);
-        }
+        let len = try!(src.take(buf_size as u64)
+                          .read(&mut buf)
+                          .and_then(eof_if_zero));
         bytes -= len;
     }
     Ok(())
@@ -1328,26 +1332,26 @@ fn track_time_to_ms(time: TrackScaledTime, scale: TrackTimeScale) -> u64 {
     time.0 * 1000000 / scale.0
 }
 
-fn be_i16<T: ReadBytesExt>(src: &mut T) -> byteorder::Result<i16> {
-    src.read_i16::<byteorder::BigEndian>()
+fn be_i16<T: ReadBytesExt>(src: &mut T) -> Result<i16> {
+    src.read_i16::<byteorder::BigEndian>().map_err(From::from)
 }
 
-fn be_i32<T: ReadBytesExt>(src: &mut T) -> byteorder::Result<i32> {
-    src.read_i32::<byteorder::BigEndian>()
+fn be_i32<T: ReadBytesExt>(src: &mut T) -> Result<i32> {
+    src.read_i32::<byteorder::BigEndian>().map_err(From::from)
 }
 
-fn be_i64<T: ReadBytesExt>(src: &mut T) -> byteorder::Result<i64> {
-    src.read_i64::<byteorder::BigEndian>()
+fn be_i64<T: ReadBytesExt>(src: &mut T) -> Result<i64> {
+    src.read_i64::<byteorder::BigEndian>().map_err(From::from)
 }
 
-fn be_u16<T: ReadBytesExt>(src: &mut T) -> byteorder::Result<u16> {
-    src.read_u16::<byteorder::BigEndian>()
+fn be_u16<T: ReadBytesExt>(src: &mut T) -> Result<u16> {
+    src.read_u16::<byteorder::BigEndian>().map_err(From::from)
 }
 
-fn be_u32<T: ReadBytesExt>(src: &mut T) -> byteorder::Result<u32> {
-    src.read_u32::<byteorder::BigEndian>()
+fn be_u32<T: ReadBytesExt>(src: &mut T) -> Result<u32> {
+    src.read_u32::<byteorder::BigEndian>().map_err(From::from)
 }
 
-fn be_u64<T: ReadBytesExt>(src: &mut T) -> byteorder::Result<u64> {
-    src.read_u64::<byteorder::BigEndian>()
+fn be_u64<T: ReadBytesExt>(src: &mut T) -> Result<u64> {
+    src.read_u64::<byteorder::BigEndian>().map_err(From::from)
 }

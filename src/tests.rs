@@ -6,6 +6,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::io::Cursor;
+use std::io::ErrorKind;
 use super::*;
 extern crate test_assembler;
 use self::test_assembler::*;
@@ -145,7 +146,7 @@ fn read_truncated_ftyp() {
     });
     let mut context = MediaContext::new();
     match read_mp4(&mut stream, &mut context) {
-        Err(Error::UnexpectedEOF) => (),
+        Err(Error::Io(UnexpectedEof)) => (),
         Ok(_) => assert!(false, "expected an error result"),
         _ => assert!(false, "expected a different error result"),
     }
@@ -553,7 +554,7 @@ fn esds_limit_2() {
     let mut stream = iter.next_box().unwrap().unwrap();
     let mut track = super::Track::new(0);
     match super::read_audio_desc(&mut stream, &mut track) {
-        Err(Error::UnexpectedEOF) => (),
+        Err(Error::Io(UnexpectedEof)) => (),
         Ok(_) => assert!(false, "expected an error result"),
         _ => assert!(false, "expected a different error result"),
     }
