@@ -1,5 +1,7 @@
+#[cfg(feature = "capi")]
 extern crate cheddar;
 
+#[cfg(feature = "capi")]
 fn main() {
     // Generate mp4parse.h.
     cheddar::Cheddar::new().expect("could not read manifest")
@@ -9,4 +11,9 @@ fn main() {
         .insert_code("// License, v. 2.0. If a copy of the MPL was not distributed with this\n")
         .insert_code("// file, You can obtain one at https://mozilla.org/MPL/2.0/.")
         .run_build("include/mp4parse.h");
+}
+
+#[cfg(not(feature = "capi"))]
+fn main() {
+    // Dummy main() since there's no way to make build.rs feature-conditional.
 }

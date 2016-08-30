@@ -14,7 +14,9 @@ use std::io::{Read, Take};
 use std::cmp;
 
 // Expose C api wrapper.
+#[cfg(feature = "capi")]
 pub mod capi;
+#[cfg(feature = "capi")]
 pub use capi::*;
 
 mod boxes;

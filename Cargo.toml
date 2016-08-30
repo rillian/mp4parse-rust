@@ -30,9 +30,10 @@ abort_on_panic = { version = "1.0.0", optional = true }
 test-assembler = "0.1.2"
 
 [build-dependencies]
-rusty-cheddar = "0.3.2"
+rusty-cheddar = { version = "0.3.2", optional = true }
 
 [features]
+capi = ["rusty-cheddar"]
 fuzz = ["afl", "afl-plugin", "abort_on_panic"]
 
 # Somewhat heavy-handed, but we want at least -Z force-overflow-checks=on.

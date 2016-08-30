@@ -1,13 +1,16 @@
 extern crate mp4parse;
 
+#[cfg(feature = "capi")]
 use mp4parse::*;
 
 #[cfg(feature = "fuzz")]
 #[macro_use]
 extern crate abort_on_panic;
 
+#[cfg(feature = "capi")]
 use std::io::Read;
 
+#[cfg(feature = "capi")]
 extern fn vec_read(buf: *mut u8, size: usize, userdata: *mut std::os::raw::c_void) -> isize {
     let mut input: &mut std::io::Cursor<Vec<u8>> = unsafe { &mut *(userdata as *mut _) };
 
@@ -18,6 +21,7 @@ extern fn vec_read(buf: *mut u8, size: usize, userdata: *mut std::os::raw::c_voi
     }
 }
 
+#[cfg(feature = "capi")]
 fn doit() {
     let mut input = Vec::new();
     std::io::stdin().read_to_end(&mut input).unwrap();
@@ -76,14 +80,19 @@ fn doit() {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "capi", feature = "fuzz"))]
 fn main() {
     abort_on_panic!({
         doit();
     });
 }
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(all(feature = "capi", not(feature = "fuzz")))]
 fn main() {
     doit();
+}
+
+#[cfg(not(feature = "capi"))]
+fn main() {
+    // Dummy main; this uses a disabled feature.
 }
