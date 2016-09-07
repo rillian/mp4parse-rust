@@ -24,10 +24,10 @@ fn public_api() {
         match track.data {
             Some(mp4::SampleEntry::Video(v)) => {
                 // track part
-                assert_eq!(track.duration, Some(mp4::TrackScaledTime(512, 0)));
+                assert_eq!(track.duration, Some(mp4::TrackScaledTime { time: 512, id: 0, } ));
                 assert_eq!(track.empty_duration, Some(mp4::MediaScaledTime(0)));
-                assert_eq!(track.media_time, Some(mp4::TrackScaledTime(0, 0)));
-                assert_eq!(track.timescale, Some(mp4::TrackTimeScale(12800, 0)));
+                assert_eq!(track.media_time, Some(mp4::TrackScaledTime { time: 0, id: 0, }));
+                assert_eq!(track.timescale, Some(mp4::TrackTimeScale { scale: 12800, id: 0, }));
                 assert_eq!(v.width, 320);
                 assert_eq!(v.height, 240);
 
@@ -56,10 +56,10 @@ fn public_api() {
             }
             Some(mp4::SampleEntry::Audio(a)) => {
                 // track part
-                assert_eq!(track.duration, Some(mp4::TrackScaledTime(2944, 1)));
+                assert_eq!(track.duration, Some(mp4::TrackScaledTime { time: 2944, id: 1, }));
                 assert_eq!(track.empty_duration, Some(mp4::MediaScaledTime(0)));
-                assert_eq!(track.media_time, Some(mp4::TrackScaledTime(1024, 1)));
-                assert_eq!(track.timescale, Some(mp4::TrackTimeScale(48000, 1)));
+                assert_eq!(track.media_time, Some(mp4::TrackScaledTime { time: 1024, id: 1, }));
+                assert_eq!(track.timescale, Some(mp4::TrackTimeScale { scale: 48000, id: 1, }));
 
                 // track.tkhd part
                 let tkhd = track.tkhd.unwrap();

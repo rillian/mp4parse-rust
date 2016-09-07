@@ -301,11 +301,17 @@ pub struct MediaScaledTime(pub u64);
 
 /// The track's local (mdhd) timescale.
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct TrackTimeScale(pub u64, pub usize);
+pub struct TrackTimeScale {
+    pub scale: u64,
+    pub id: usize,
+}
 
 /// A time scaled by the track's local (mdhd) timescale.
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub struct TrackScaledTime(pub u64, pub usize);
+pub struct TrackScaledTime {
+    pub time: u64,
+    pub id: usize,
+}
 
 /// A fragmented file contains no sample data in stts, stsc, and stco.
 #[derive(Debug, Default)]
@@ -588,8 +594,10 @@ fn read_edts<T: Read>(f: &mut BMFFBox<T>, track: &mut Track) -> Result<()> {
                 if elst.edits[idx].media_time < 0 {
                     return Err(Error::InvalidData("unexpected negative media time in edit"));
                 }
-                track.media_time = Some(TrackScaledTime(elst.edits[idx].media_time as u64,
-                                                        track.id));
+                track.media_time = Some(TrackScaledTime {
+                    time: elst.edits[idx].media_time as u64,
+                    id: track.id,
+                });
                 log!("{:?}", elst);
             }
             _ => try!(skip_box_content(&mut b)),
@@ -603,12 +611,18 @@ fn parse_mdhd<T: Read>(f: &mut BMFFBox<T>, track: &mut Track) -> Result<(MediaHe
     let mdhd = try!(read_mdhd(f));
     let duration = match mdhd.duration {
         std::u64::MAX => None,
-        duration => Some(TrackScaledTime(duration, track.id)),
+        duration => Some(TrackScaledTime {
+            time: duration,
+            id: track.id,
+        }),
     };
     if mdhd.timescale == 0 {
         return Err(Error::InvalidData("zero timescale in mdhd"));
     }
-    let timescale = Some(TrackTimeScale(mdhd.timescale as u64, track.id));
+    let timescale = Some(TrackTimeScale {
+        scale: mdhd.timescale as u64,
+        id: track.id,
+    });
     Ok((mdhd, duration, timescale))
 }
 

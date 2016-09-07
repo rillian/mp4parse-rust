@@ -284,9 +284,9 @@ fn media_time_to_ms(time: MediaScaledTime, scale: MediaTimeScale) -> u64 {
 }
 
 fn track_time_to_ms(time: TrackScaledTime, scale: TrackTimeScale) -> u64 {
-    assert!(time.1 == scale.1);
-    assert!(scale.0 != 0);
-    time.0 * 1000000 / scale.0
+    assert!(time.id == scale.id);
+    assert!(scale.scale != 0);
+    time.time * 1000000 / scale.scale
 }
 
 /// Fill the supplied `mp4parse_track_info` with metadata for `track`.
