@@ -1,0 +1,16 @@
+[package]
+name = "flac2mp4"
+version = "0.1.0"
+authors = ["Ralph Giles <giles@mozilla.com>"]
+
+description = "Remux native FLAC files into the iso mp4 container"
+license = "MPL-2.0"
+
+repository = "https://github.com/mozilla/mp4parse-rust"
+
+# Avoid complaints about trying to package test files.
+exclude = [
+  "*.mp4",
+]
+
+[dependencies]
