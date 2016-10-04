@@ -1,5 +1,9 @@
 extern crate byteorder;
-use byteorder::ReadBytesExt;
+use byteorder::{
+    ByteOrder,
+    BigEndian,
+    ReadBytesExt,
+};
 
 use std::fs::File;
 use std::io::{
@@ -59,10 +63,7 @@ struct MetadataBlock {
 fn read_metadata<R: Read>(src: &mut R) -> Result<MetadataBlock> {
     let mut buffer = [0u8; 4];
     try!(src.read_exact(&mut buffer));
-    let length = 
-        (buffer[1] as u32) << 16 |
-        (buffer[2] as u32) <<  8 |
-        (buffer[3] as u32);
+    let length = BigEndian::read_uint(&buffer[1..4], 3) as u32;
     let mut data = vec![0; length as usize];
     try!(src.read_exact(data.as_mut_slice()));
     Ok(MetadataBlock {
@@ -86,10 +87,10 @@ struct StreamInfo {
 }
 
 fn parse_stream_info<R: ReadBytesExt>(src: &mut R) -> Result<StreamInfo> {
-    let block_min = try!(src.read_u16::<byteorder::BigEndian>());
-    let block_max = try!(src.read_u16::<byteorder::BigEndian>());
-    let frame_min = try!(src.read_uint::<byteorder::BigEndian>(3)) as u32;
-    let frame_max = try!(src.read_uint::<byteorder::BigEndian>(3)) as u32;
+    let block_min = try!(src.read_u16::<BigEndian>());
+    let block_max = try!(src.read_u16::<BigEndian>());
+    let frame_min = try!(src.read_uint::<BigEndian>(3)) as u32;
+    let frame_max = try!(src.read_uint::<BigEndian>(3)) as u32;
     let mut buffer = [0u8; 8];
     try!(src.read_exact(&mut buffer));
     let sample_rate =
