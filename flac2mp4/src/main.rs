@@ -1,3 +1,5 @@
+extern crate byteorder;
+use byteorder::ReadBytesExt;
 
 use std::fs::File;
 use std::io::{
@@ -70,6 +72,60 @@ fn read_metadata<R: Read>(src: &mut R) -> Result<MetadataBlock> {
     })
 }
 
+#[derive(Debug)]
+struct StreamInfo {
+    block_min: u16,
+    block_max: u16,
+    frame_min: u32,
+    frame_max: u32,
+    sample_rate: u32,
+    channel_count: u8,
+    bit_depth: u8,
+    total_samples: u64,
+    md5: [u8; 16],
+}
+
+fn parse_stream_info<R: ReadBytesExt>(src: &mut R) -> Result<StreamInfo> {
+    let block_min = try!(src.read_u16::<byteorder::BigEndian>());
+    let block_max = try!(src.read_u16::<byteorder::BigEndian>());
+    let frame_min = try!(src.read_uint::<byteorder::BigEndian>(3)) as u32;
+    let frame_max = try!(src.read_uint::<byteorder::BigEndian>(3)) as u32;
+    let mut buffer = [0u8; 8];
+    try!(src.read_exact(&mut buffer));
+    let sample_rate =
+        (buffer[0] as u32) << 12 |
+        (buffer[1] as u32) <<  4 |
+        ((buffer[2] & 0xf0) as u32);
+    if sample_rate == 0 || sample_rate > 655350 {
+        return Err(Error::new(ErrorKind::InvalidData,
+                              "StreamInfo sample rate invalid!"));
+    }
+    let channel_count = (buffer[2] & 0x0e) >> 1;
+    if channel_count == 0 {
+        return Err(Error::new(ErrorKind::InvalidData,
+                              "StreamInfo channel count invalid!"));
+    }
+    let bit_depth = ((buffer[2] & 0x01) << 4 | (buffer[3] & 0xf0) >> 4) + 1;
+    let total_samples =
+        ((buffer[3] & 0x0f) as u64) << 32 |
+        (buffer[4] as u64) << 24 |
+        (buffer[5] as u64) << 16 |
+        (buffer[6] as u64) << 8 |
+        (buffer[7] as u64);
+    let mut md5 = [0u8; 16];
+    try!(src.read_exact(&mut md5));
+    Ok(StreamInfo {
+        block_min: block_min,
+        block_max: block_max,
+        frame_min: frame_min,
+        frame_max: frame_max,
+        sample_rate: sample_rate,
+        channel_count: channel_count,
+        bit_depth: bit_depth,
+        total_samples: total_samples,
+        md5: md5,
+    })
+}
 
 fn convert(filename: &str) -> Result<()> {
     let mut file = try!(File::open(filename));
@@ -91,6 +147,9 @@ fn convert(filename: &str) -> Result<()> {
     assert!(!metadata.is_empty(), "No metadata block found!");
     assert_eq!(metadata[0].block_type, BlockType::StreamInfo,
                "Invalid: first metadata block is not streaminfo!");
+    let mut c = std::io::Cursor::new(&metadata[0].data);
+    let stream_info = try!(parse_stream_info(&mut c));
+    println!("  {:?}", stream_info);
     Ok(())
 }
 
