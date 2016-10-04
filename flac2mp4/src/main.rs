@@ -20,13 +20,29 @@ fn is_flac<R: Read>(src: &mut R) -> Result<()> {
 #[derive(Debug,PartialEq)]
 enum BlockType {
     StreamInfo = 0,
+    Padding = 1,
+    Application = 2,
+    SeekTable = 3,
+    VorbisComment = 4,
+    Cuesheet = 5,
+    Picture = 6,
+    Reserved = 7,
     Unknown,
+    Invalid = 127,
 }
 
 impl From<u8> for BlockType {
     fn from(v: u8) -> Self {
         match v {
             0 => BlockType::StreamInfo,
+            1 => BlockType::Padding,
+            2 => BlockType::Application,
+            3 => BlockType::SeekTable,
+            4 => BlockType::VorbisComment,
+            5 => BlockType::Cuesheet,
+            6 => BlockType::Picture,
+            7...126 => BlockType::Reserved,
+            127 => BlockType::Invalid,
             _ => BlockType::Unknown,
         }
     }
@@ -45,7 +61,7 @@ fn read_metadata<R: Read>(src: &mut R) -> Result<MetadataBlock> {
         (buffer[1] as u32) << 16 |
         (buffer[2] as u32) <<  8 |
         (buffer[3] as u32);
-    let mut data = Vec::with_capacity(length as usize);
+    let mut data = vec![0; length as usize];
     try!(src.read_exact(data.as_mut_slice()));
     Ok(MetadataBlock {
         last: (buffer[0] & 0x80) > 0,
@@ -63,11 +79,18 @@ fn convert(filename: &str) -> Result<()> {
     }
     println!("Converting {}...", filename);
     let mut metadata = Vec::new();
-    let block = try!(read_metadata(&mut file));
-    assert_eq!(block.block_type, BlockType::StreamInfo,
+    loop {
+        let block = try!(read_metadata(&mut file));
+        println!("  {:?} block {} bytes", block.block_type, block.data.len());
+        let last = block.last;
+        metadata.push(block);
+        if last {
+            break;
+        }
+    }
+    assert!(!metadata.is_empty(), "No metadata block found!");
+    assert_eq!(metadata[0].block_type, BlockType::StreamInfo,
                "Invalid: first metadata block is not streaminfo!");
-    assert!(block.last, "Unhandled multiple metadata blocks!"); 
-    metadata.push(block);
     Ok(())
 }
 
