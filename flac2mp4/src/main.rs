@@ -96,7 +96,7 @@ fn parse_stream_info<R: ReadBytesExt>(src: &mut R) -> Result<StreamInfo> {
     let sample_rate =
         (buffer[0] as u32) << 12 |
         (buffer[1] as u32) <<  4 |
-        ((buffer[2] & 0xf0) as u32);
+        ((buffer[2] & 0xf0) as u32) >> 4;
     if sample_rate == 0 || sample_rate > 655350 {
         return Err(Error::new(ErrorKind::InvalidData,
                               "StreamInfo sample rate invalid!"));
