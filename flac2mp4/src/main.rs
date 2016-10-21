@@ -60,7 +60,7 @@ struct MetadataBlock {
     data: Vec<u8>,
 }
 
-fn read_metadata<R: Read>(src: &mut R) -> Result<MetadataBlock> {
+fn read_metadata_block<R: Read>(src: &mut R) -> Result<MetadataBlock> {
     let mut buffer = [0u8; 4];
     try!(src.read_exact(&mut buffer));
     let length = BigEndian::read_uint(&buffer[1..4], 3) as u32;
@@ -71,6 +71,20 @@ fn read_metadata<R: Read>(src: &mut R) -> Result<MetadataBlock> {
         block_type: BlockType::from(buffer[0] & 0x7f),
         data: data,
     })
+}
+
+fn read_metadata<R: Read>(src: &mut R) -> Result<Vec<MetadataBlock>> {
+    let mut metadata = Vec::new();
+    loop {
+        let block = try!(read_metadata_block(src));
+        println!("  {:?} block {} bytes", block.block_type, block.data.len());
+        let last = block.last;
+        metadata.push(block);
+        if last {
+            break;
+        }
+    }
+    Ok(metadata)
 }
 
 #[derive(Debug)]
@@ -135,16 +149,7 @@ fn convert(filename: &str) -> Result<()> {
         return Err(Error::new(ErrorKind::InvalidData, "Not a FLAC file"));
     }
     println!("Converting {}...", filename);
-    let mut metadata = Vec::new();
-    loop {
-        let block = try!(read_metadata(&mut file));
-        println!("  {:?} block {} bytes", block.block_type, block.data.len());
-        let last = block.last;
-        metadata.push(block);
-        if last {
-            break;
-        }
-    }
+    let metadata = try!(read_metadata(&mut file));
     assert!(!metadata.is_empty(), "No metadata block found!");
     assert_eq!(metadata[0].block_type, BlockType::StreamInfo,
                "Invalid: first metadata block is not streaminfo!");
