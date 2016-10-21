@@ -32,7 +32,7 @@ enum BlockType {
     VorbisComment = 4,
     Cuesheet = 5,
     Picture = 6,
-    Reserved = 7,
+    Reserved,
     Unknown,
     Invalid = 127,
 }
