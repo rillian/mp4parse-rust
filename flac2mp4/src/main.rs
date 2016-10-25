@@ -142,6 +142,108 @@ fn parse_stream_info<R: ReadBytesExt>(src: &mut R) -> Result<StreamInfo> {
     })
 }
 
+#[derive(Debug)]
+struct Frame {
+    block_size: u32,
+    sample_rate: u32,
+}
+
+struct BlockSizeTable {
+    Some(u32),
+    Lookup8Bit,
+    Lookup16Bit,
+}
+
+struct SampleRateTable {
+    /// Defined value in Hz.
+    Some(u32),
+    /// Tags for the presence of variable-length fields.
+    Lookup8Bit,
+    Lookup16Bit,
+    Lookup16Bit10x,
+}
+
+fn read_frame<R: Read>(src: &mut R, info: &StreamInfo) -> Result<Frame> {
+    let sync = try!(src.read_u16::<BigEndian>());
+    if sync >> 2 != 0b11111111111110 {
+        return Err(Error::new(ErrorKind::InvalidData,
+                              "Lost sync reading Frame Header!"));
+    }
+    if sync & 0b10 != 0 {
+        return Err(Error::new(ErrorKind::InvalidData,
+                              "non-zero reserved bit 14 in Frame Header"));
+    }
+    let blocking_strategy = sync & 0b01;
+
+    let temp = try!(src.read_u16::<BigEndian>());
+    let block_size = match temp >> 12 {
+        0b0000 => return Err(Error::new(ErrorKind::InvalidData,
+                                        "reserved block size in Frame Header")),
+        0b0001 => Some(192),
+        n @ 0b0010...0b0101 => Some(576 * 2u32.pow(n - 2)),
+        0b0110 => Lookup8Bit,
+        0b0111 => Lookup16Bit,
+        n @ 0b1000...0b1111 => Some(256 * 2u32.pow(n - 8)),
+    };
+    let sample_rate = (match temp >> 8) & 0x000f {
+        0b0000 => Some(info.sample_rate),
+        0b0001 => Some( 88 200), // Hz
+        0b0010 => Some(176 400),
+        0b0011 => Some(192 000),
+        0b0100 => Some(  8 000),
+        0b0101 => Some( 16 000),
+        0b0110 => Some( 22 050),
+        0b0111 => Some( 24 000),
+        0b1000 => Some( 32 000),
+        0b1001 => Some( 44 100),
+        0b1010 => Some( 48 000),
+        0b1011 => Some( 96 000),
+        0b1100 => Lookup8Bit,
+        0b1101 => Lookup16Bit,
+        0b1110 => Lookup16Bit10x,
+        0b1111 => return Err(Error::new(ErrorKind::InvalidData,
+                      "Invalid sample rate in Frame Header!")),
+    };
+    let channel_assignment = (temp >> 4) & 0x000f;
+    let sample_size = match (temp >> 1) & 0x0007 {
+        0b000 => info.bit_depth,
+        0b001 => 8,
+        0b010 => 12,
+        0b100 => 16,
+        0b101 => 20,
+        0b110 => 24,
+        0b011 | 0b111 => return Err(Error::new(ErrorKind::InvalidData,
+                             "Invalid sample size in Frame Header!")),
+    };
+
+    if temp & 0x0001 {
+        return Err(Error::new(ErrorKind::InvalidData,
+                              "non-zero reserved bit 32 in Frame Header"));
+    }
+
+    // Read variable-length fields, if any.
+    match blocking_strategy {
+        0 => try!(src.read_varint(31)),
+        1 => try!(src.read_varint(36)),
+    }
+    let block_size = match block_size {
+        Some(v) => v,
+        Lookup8Bit => try!(src.read_u8()),
+        Lookup16 => try!(src.read_u16::<BigEndian>()),
+    };
+    let sample_rate = match sample_rate {
+        Some(v) => v,
+        Lookup8Bit => try!(src.read_u8()),
+        Lookup16Bit => try!(src.read_u16::<BigEndian>()),
+        Lookup16Bit10x => 10 * try!(src.read_u16::<BigEndian>()),
+    };
+
+    Ok(Frame {
+        block_size = block_size,
+        sample_rate = sample_rate,
+    })
+}
+
 fn convert(filename: &str) -> Result<()> {
     let mut file = try!(File::open(filename));
     if is_flac(&mut file).is_err() {
@@ -156,6 +258,8 @@ fn convert(filename: &str) -> Result<()> {
     let mut c = std::io::Cursor::new(&metadata[0].data);
     let stream_info = try!(parse_stream_info(&mut c));
     println!("  {:?}", stream_info);
+    let frame = try!(read_frame(&mut file));
+    println!("    {:?}", frame);
     Ok(())
 }
 
