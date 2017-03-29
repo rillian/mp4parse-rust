@@ -1,5 +1,13 @@
-extern crate mp4parse_capi;
-use mp4parse_capi::mp4parse_io;
+/// Testcase for null function pointer checking.
+///
+/// Assertion fails on 1.18-nightly.
+
+#[repr(C)]
+#[derive(Clone)]
+pub struct mp4parse_io {
+    pub read: extern fn(buffer: *mut u8, size: usize, userdata: *mut std::os::raw::c_void) -> isize,
+    pub userdata: *mut std::os::raw::c_void,
+}
 
 // Even though mp4parse_parser is opaque to C, rusty-cheddar won't let us
 // use more than one member, so we introduce *another* wrapper.
