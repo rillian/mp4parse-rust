@@ -4,38 +4,26 @@
 
 type ReadFn = extern fn(*mut u8, usize) -> isize;
 
-#[repr(C)]
-#[derive(Clone)]
-pub struct mp4parse_io {
+struct Io {
     pub read: ReadFn,
 }
 
-unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut mp4parse_io {
-    // is_null() isn't available on a fn type because it can't be null (in
-    // Rust) by definition.  But since this value is coming from the C API,
-    // it *could* be null.  Ideally, we'd wrap it in an Option to represent
-    // reality, but this causes rusty-cheddar to emit the wrong type
-    // (https://github.com/Sean1708/rusty-cheddar/issues/30).
+unsafe extern fn validate(io: *const Io) {
     if ((*io).read as *mut std::os::raw::c_void).is_null() {
-        return std::ptr::null_mut();
+        return;
     }
-    let parser = Box::new( (*io).clone() );
-
-    Box::into_raw(parser)
-}
-
-fn boom() {
-    let parser = unsafe {
-        let io = mp4parse_io {
-            read: std::mem::transmute::<*const (), ReadFn>(std::ptr::null()),
-        };
-        mp4parse_new(&io)
-    };
-    assert!(parser.is_null());
+    panic!("Null check failed!");
 }
 
 fn main() {
     println!("Testing null read callback... ");
-    boom();
+
+    unsafe {
+        let io = Io {
+            read: std::mem::transmute::<*const (), ReadFn>(std::ptr::null()),
+        };
+        validate(&io);
+    }
+
     println!("Ok!");
 }
