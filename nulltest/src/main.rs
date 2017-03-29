@@ -2,24 +2,23 @@
 ///
 /// Assertion fails on 1.18-nightly.
 
+type ReadFn = extern fn(*mut u8, usize, *mut std::os::raw::c_void) -> isize;
+
 #[repr(C)]
 #[derive(Clone)]
 pub struct mp4parse_io {
-    pub read: extern fn(buffer: *mut u8, size: usize, userdata: *mut std::os::raw::c_void) -> isize,
+    pub read: ReadFn,
     pub userdata: *mut std::os::raw::c_void,
 }
 
 // Even though mp4parse_parser is opaque to C, rusty-cheddar won't let us
 // use more than one member, so we introduce *another* wrapper.
+#[repr(C)]
 struct Wrap {
     io: mp4parse_io,
 }
 
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub struct mp4parse_parser(Wrap);
-
-unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut mp4parse_parser {
+unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut Wrap {
     if io.is_null() || (*io).userdata.is_null() {
         return std::ptr::null_mut();
     }
@@ -31,14 +30,12 @@ unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut mp4parse_parser {
     if ((*io).read as *mut std::os::raw::c_void).is_null() {
         return std::ptr::null_mut();
     }
-    let parser = Box::new(mp4parse_parser(Wrap {
+    let parser = Box::new(Wrap {
         io: (*io).clone(),
-    }));
+    });
 
     Box::into_raw(parser)
 }
-
-type ReadFn = extern fn(*mut u8, usize, *mut std::os::raw::c_void) -> isize;
 
 fn boom() {
     let mut dummy = 42;
@@ -53,7 +50,7 @@ fn boom() {
 }
 
 fn main() {
-    println!("Testing new read callback... ");
+    println!("Testing null read callback... ");
     boom();
     println!("Ok!");
 }
