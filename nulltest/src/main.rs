@@ -8,7 +8,8 @@ struct Io {
     pub read: ReadFn,
 }
 
-unsafe extern fn validate(io: *const Io) {
+extern fn validate(io: *const Io) {
+    let io = unsafe { &*io };
     if ((*io).read as *mut std::os::raw::c_void).is_null() {
         return;
     }
@@ -18,12 +19,12 @@ unsafe extern fn validate(io: *const Io) {
 fn main() {
     println!("Testing null read callback... ");
 
-    unsafe {
-        let io = Io {
+    let io = unsafe {
+        Io {
             read: std::mem::transmute::<*const (), ReadFn>(std::ptr::null()),
-        };
-        validate(&io);
-    }
+        }
+    };
+    validate(&io);
 
     println!("Ok!");
 }
