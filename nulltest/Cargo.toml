@@ -1,0 +1,7 @@
+[package]
+name = "nulltest"
+version = "0.1.0"
+authors = ["giles <giles@mozilla.com>"]
+
+[dependencies]
+mp4parse_capi = { path = '../mp4parse_capi' }
