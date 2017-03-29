@@ -1,13 +1,11 @@
 extern crate mp4parse_capi;
 use mp4parse_capi::mp4parse_io;
-use std::collections::HashMap;
 
 // Even though mp4parse_parser is opaque to C, rusty-cheddar won't let us
 // use more than one member, so we introduce *another* wrapper.
 struct Wrap {
     io: mp4parse_io,
     poisoned: bool,
-    opus_header: HashMap<u32, Vec<u8>>,
     pssh_data: Vec<u8>,
 }
 
@@ -30,7 +28,6 @@ unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut mp4parse_parser {
     let parser = Box::new(mp4parse_parser(Wrap {
         io: (*io).clone(),
         poisoned: false,
-        opus_header: HashMap::new(),
         pssh_data: Vec::new(),
     }));
 
