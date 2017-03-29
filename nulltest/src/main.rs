@@ -1,6 +1,5 @@
 extern crate mp4parse_capi;
 use mp4parse_capi::mp4parse_io;
-use mp4parse_capi::mp4parse_indice;
 use std::collections::HashMap;
 
 // Even though mp4parse_parser is opaque to C, rusty-cheddar won't let us
@@ -10,7 +9,6 @@ struct Wrap {
     poisoned: bool,
     opus_header: HashMap<u32, Vec<u8>>,
     pssh_data: Vec<u8>,
-    sample_table: HashMap<u32, Vec<mp4parse_indice>>,
 }
 
 #[repr(C)]
@@ -34,7 +32,6 @@ unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut mp4parse_parser {
         poisoned: false,
         opus_header: HashMap::new(),
         pssh_data: Vec::new(),
-        sample_table: HashMap::new(),
     }));
 
     Box::into_raw(parser)
