@@ -13,8 +13,6 @@ pub struct mp4parse_io {
 // use more than one member, so we introduce *another* wrapper.
 struct Wrap {
     io: mp4parse_io,
-    poisoned: bool,
-    pssh_data: Vec<u8>,
 }
 
 #[repr(C)]
@@ -35,8 +33,6 @@ unsafe extern fn mp4parse_new(io: *const mp4parse_io) -> *mut mp4parse_parser {
     }
     let parser = Box::new(mp4parse_parser(Wrap {
         io: (*io).clone(),
-        poisoned: false,
-        pssh_data: Vec::new(),
     }));
 
     Box::into_raw(parser)
