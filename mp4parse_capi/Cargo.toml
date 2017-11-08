@@ -30,7 +30,7 @@ mp4parse = {version = "0.8.0", path = "../mp4parse"}
 num-traits = "0.1.37"
 
 [build-dependencies]
-cbindgen = "0.1.29"
+cbindgen = "0.1.30"
 
 [features]
 fuzz = ["mp4parse/fuzz"]
