@@ -13,9 +13,6 @@ tasks:
       maxRunTime: 3600
       image: rust
       command:
-        - /bin/bash
-        - '--login'
-        - '-c'
         - >-
           git clone {{event.head.repo.url}} repo && cd repo && git config
           advice.detachedHead false && git checkout {{event.head.sha}} &&
