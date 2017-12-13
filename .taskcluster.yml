@@ -11,15 +11,8 @@ tasks:
           - release
     payload:
       maxRunTime: 3600
-      image: node
-      command:
-        - /bin/bash
-        - '--login'
-        - '-c'
-        - >-
-          git clone {{event.head.repo.url}} repo && cd repo && git config
-          advice.detachedHead false && git checkout {{event.head.sha}} && 
-          cargo test
+      image: jimmycuadra/rust
+      command: []
     metadata:
       name: mp4parse
       description: Run cargo test for the mp4parse crates
