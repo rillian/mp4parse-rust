@@ -11,13 +11,12 @@ tasks:
           - release
     payload:
       maxRunTime: 3600
-      image: jimmycuadra/rust
+      image: rust
       command:
         - /bin/bash
         - '--login'
         - '-c'
         - >-
-          curl https://sh.rustup.rs -sSf | sh && . ~/.cargo/env &&
           git clone {{event.head.repo.url}} repo && cd repo && git config
           advice.detachedHead false && git checkout {{event.head.sha}} &&
           cargo test
